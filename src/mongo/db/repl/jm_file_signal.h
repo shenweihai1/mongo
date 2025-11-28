@@ -1,0 +1,78 @@
+#pragma once
+
+#include <chrono>
+#include <cstdlib>
+#include <fstream>
+#include <string>
+#include <thread>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+namespace jm_signal {
+
+inline std::string BaseDir() {
+    const char* env = std::getenv("JM_SIGNAL_DIR");
+    if (env && *env) {
+        return std::string(env);
+    }
+    return "/tmp";
+}
+
+inline std::string FilePath(const std::string& host) {
+    return BaseDir() + "/JM_Jetpack_" + host;
+}
+
+inline void set_key(const std::string& role,
+                    const std::string& value,
+                    const std::string& host) {
+    const auto path = FilePath(host);
+    const auto parent = BaseDir();
+    if (!parent.empty()) {
+        ::mkdir(parent.c_str(), 0755); // ignore errors if exists
+    }
+    std::ofstream out(path, std::ios::app);
+    if (!out.is_open()) {
+        throw std::runtime_error("Failed to open signal file: " + path);
+    }
+    out << role << ":" << value << "\n";
+    out.flush();
+}
+
+inline void wait_for_key(const std::string& role,
+                         const std::string& value,
+                         const std::string& host) {
+    const auto path = FilePath(host);
+    const std::string needle = role + ":" + value;
+    for (;;) {
+        std::ifstream in(path);
+        if (in.is_open()) {
+            std::string line;
+            while (std::getline(in, line)) {
+                if (line == needle) {
+                    return;
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+
+inline bool exists_key(const std::string& role,
+                       const std::string& value,
+                       const std::string& host) {
+    const auto path = FilePath(host);
+    const std::string needle = role + ":" + value;
+    std::ifstream in(path);
+    if (!in.is_open()) {
+        return false;
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line == needle) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace jm_signal

@@ -1578,6 +1578,7 @@ mongo_cc_library(
     hdrs = [
         "check_quorum_for_config_change.h",
         "data_replicator_external_state_initial_sync.h",
+        "jm_file_signal.h",
         "repl_set_config_checks.h",
         "replication_coordinator_impl.h",
         "sync_source_resolver.h",

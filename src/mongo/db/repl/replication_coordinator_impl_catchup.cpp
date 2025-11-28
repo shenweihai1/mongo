@@ -32,10 +32,17 @@
 #include "mongo/db/repl/replication_metrics.h"
 #include "mongo/db/vector_clock.h"
 #include "mongo/db/vector_clock_mutable.h"
+#include "mongo/db/server_options.h"
 #include "mongo/executor/thread_pool_task_executor.h"
 #include "mongo/logv2/log.h"
+#include "mongo/util/net/socket_utils.h"
 #include "mongo/util/time_support.h"
+#include <thread>
+#include "mongo/db/repl/jm_file_signal.h"
 
+#ifndef JETPACK_MONGODB_RECOVERY
+#define JETPACK_MONGODB_RECOVERY 1
+#endif
 
 #define MONGO_LOGV2_DEFAULT_COMPONENT ::mongo::logv2::LogComponent::kReplication
 
@@ -390,6 +397,37 @@ void ReplicationCoordinatorImpl::_postWonElectionUpdateMemberState(WithLock lk) 
     // heartbeats because all heartbeats must be restarted upon election succeeding.
     _cancelHeartbeats(lk);
     _startHeartbeats(lk);
+
+#ifdef JETPACK_MONGODB_RECOVERY
+    std::string hostName = getHostNameCached();
+    if (!serverGlobalParams.bind_ips.empty()) {
+        hostName = serverGlobalParams.bind_ips.front(); // return ip "127.0.0.1"
+    }
+    try {
+        jm_signal::set_key("mongo", "primary_elected", hostName);
+        LOGV2(9999010,
+              "JetPack signal: wrote mongo leader election flag",
+              "host"_attr = hostName);
+    } catch (const std::exception& ex) {
+        LOGV2(9999011,
+              "JetPack signal: failed to write mongo leader election flag",
+              "error"_attr = ex.what(),
+              "host"_attr = hostName);
+    }
+    std::thread([hostName]() {
+        try {
+            jm_signal::wait_for_key("jetpack", "recovery_finish", hostName);
+            LOGV2(9999012,
+                  "JetPack signal: observed jetpack recovery finish",
+                  "host"_attr = hostName);
+        } catch (const std::exception& ex) {
+            LOGV2(9999013,
+                  "JetPack signal: failed while waiting for jetpack recovery finish",
+                  "error"_attr = ex.what(),
+                  "host"_attr = hostName);
+        }
+    }).detach();
+#endif
 
     invariant(!_catchupState);
     _catchupState = std::make_unique<CatchupState>(this);
